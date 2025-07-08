@@ -4,7 +4,7 @@
 
 from __future__ import unicode_literals
 
-import imghdr
+# import imghdr   # Removed in Python 3.13
 import os
 import sys
 import time
@@ -22,7 +22,25 @@ from marrow.mailer.address import Address, AddressList, AutoConverter
 from marrow.util.compat import basestring, unicode, native
 
 
+
 __all__ = ['Message']
+
+
+def detect_image_type(raw_data):
+	if sys.version_info >= (3, 11):
+		from PIL import Image
+		from io import BytesIO
+		try:
+			with Image.open(BytesIO(raw_data)) as img:
+				return img.format  # Returns the image format like 'JPEG', 'PNG', etc.
+		except Exception as e:
+			return f"Error: {e}"
+	else:
+		# Deprecated in 3.11 and removed in Python 3.13
+		import imghdr
+		return imghdr.what(None, raw_data)
+
+
 
 
 class Message(object):
@@ -87,8 +105,11 @@ class Message(object):
 		for k in kw:
 			if not hasattr(self, k):
 				raise TypeError("Unexpected keyword argument: %s" % k)
+			try:
+				setattr(self, k, kw[k])
+			except ValueError as  e:  # we need info about what key caused the error.
+				raise ValueError("Unable to set %s to value %s: %s" % (k, kw[k], e))
 
-			setattr(self, k, kw[k])
 
 	def __setattr__(self, name, value):
 		"""Set the dirty flag as properties are updated."""
@@ -360,7 +381,7 @@ class Message(object):
 		else:
 			raise TypeError("Unable to read image contents")
 
-		subtype = imghdr.what(None, data)
+		subtype = detect_image_type(data) # was: imghdr.what(None, data)
 		self.attach(name, data, 'image', subtype, True)
 
 	@staticmethod

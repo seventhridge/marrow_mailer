@@ -4,13 +4,14 @@
 
 
 __all__ = [
-        'MailException',
-        'MailConfigurationException',
-        'TransportException',
-        'TransportFailedException',
-        'MessageFailedException',
-        'TransportExhaustedException',
-        'ManagerException'
+    'MailException',
+    'MailConfigurationException',
+    'TransportException',
+    'TransportFailedException',
+    'TransportFatalException',
+    'MessageFailedException',
+    'TransportExhaustedException',
+    'ManagerException'
     ]
 
 
@@ -64,6 +65,12 @@ class TransportFailedException(TransportException):
     """The transport has failed to deliver the message due to an internal
     error; a new instance of the transport should be used to retry."""
     
+    pass
+
+
+class TransportFatalException(TransportException):
+    """The transport has failed to deliver the message and retry is not possible."""
+
     pass
 
 

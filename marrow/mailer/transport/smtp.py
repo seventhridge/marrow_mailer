@@ -12,7 +12,7 @@ from marrow.util.compat import native
 
 from marrow.mailer.exc import (
     TransportExhaustedException, TransportException, TransportFailedException,
-    MessageFailedException)
+    MessageFailedException, TransportFatalException)
 
 log = __import__('logging').getLogger(__name__)
 
@@ -67,15 +67,33 @@ class SMTPTransport(object):
                 self.connection = None
 
     def connect_to_server(self):
-        if self.tls == 'ssl': # pragma: no cover
-            connection = SMTP_SSL(host=None, local_hostname=self.local_hostname, keyfile=self.keyfile,
-                                  certfile=self.certfile, timeout=self.timeout)
-        else:
-            connection = SMTP(local_hostname=self.local_hostname, timeout=self.timeout)
+        """
+        uses Python's SMTPLib,  which can raise the following exeptions:
 
-        log.info("Connecting to SMTP server %s:%s", self.host, self.port)
-        connection.set_debuglevel(self.debug)
-        connection.connect(self.host, self.port)
+        SMTPHeloError            The server didn't reply properly to the helo greeting.
+        SMTPAuthenticationError  The server didn't accept the username/ password combination.
+        SMTPNotSupportedError    The AUTH command is not supported by the server.
+        SMTPException            No suitable authentication method was found.
+
+        """
+        smtp_error = ''
+        try:
+            if self.tls == 'ssl': # pragma: no cover
+                connection = SMTP_SSL(host=None, local_hostname=self.local_hostname, keyfile=self.keyfile,
+                                      certfile=self.certfile, timeout=self.timeout)
+            else:
+                connection = SMTP(local_hostname=self.local_hostname, timeout=self.timeout)
+
+            log.info("Connecting to SMTP server %s:%s", self.host, self.port)
+            connection.set_debuglevel(self.debug)
+            connection.connect(self.host, self.port)
+        except SMTPException as e:
+            if hasattr(e, 'smtp_error'):
+                smtp_error = "SMTP error: " + e.smtp_error.decode('utf-8')
+            log.exception("Failed to connect to SMTP server %s:%s  error %s", self.host, self.port, smtp_error)
+            raise TransportFatalException(f"SMTP initial connect failed. {str(e)} {smtp_error}")
+        finally:
+            self.shutdown()
 
         # Do TLS handshake if configured
         connection.ehlo()
@@ -83,12 +101,18 @@ class SMTPTransport(object):
             if connection.has_extn('STARTTLS'): # pragma: no cover
                 connection.starttls(self.keyfile, self.certfile)
             elif self.tls == 'required':
-                raise TransportException('TLS is required but not available on the server -- aborting')
+                log.exception("TLS is required but not available on the server -- aborting")
+                raise TransportFailedException('TLS is required but not available on the server')
 
         # Authenticate to server if necessary
         if self.username and self.password:
             log.info("Authenticating as %s", self.username)
-            connection.login(self.username, self.password)
+            try:
+                connection.login(self.username, self.password)
+            except SMTPException as e:
+                if hasattr(e, 'smtp_error'):
+                    smtp_error = "SMTP error: " + e.smtp_error.decode('utf-8')
+                raise TransportFatalException(str(e) + f" {smtp_error}")
 
         self.connection = connection
         self.sent = 0
@@ -99,6 +123,7 @@ class SMTPTransport(object):
 
     def deliver(self, message):
         if not self.connected:
+            # raises appropriate exception if it fails
             self.connect_to_server()
 
         try:
@@ -132,7 +157,6 @@ class SMTPTransport(object):
             if message.retries >= 0:
                 log.warning("%s DEFERRED %s", message.id, "SMTPServerDisconnected")
                 message.retries -= 1
-
             raise TransportFailedException()
 
         except Exception as e: # pragma: no cover
@@ -142,7 +166,8 @@ class SMTPTransport(object):
             if message.retries >= 0:
                 log.exception("%s DEFERRED %s", message.id, cls_name)
                 message.retries -= 1
+                raise TransportFailedException()
 
             else:
                 log.exception("%s REFUSED %s", message.id, cls_name)
-                raise TransportFailedException()
+                raise TransportFatalException(e)

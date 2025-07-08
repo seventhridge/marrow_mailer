@@ -4,7 +4,9 @@
 
 
 import warnings
-import pkg_resources
+# import pkg_resources
+# Modern replacement for pkg_resources.iter_entry_points - requires Python 3.8+
+import importlib.metadata
 
 from email import charset
 from functools import partial
@@ -19,7 +21,9 @@ from marrow.util.object import load_object
 
 __all__ = ['Mailer', 'Delivery', 'Message']
 
-log = __import__('logging').getLogger(__name__)
+#import logger
+#log = logging.getLogger(__name__)
+#log = __import__('logging').getLogger(__name__)
 
 
 class Mailer(object):
@@ -46,9 +50,9 @@ class Mailer(object):
 		if 'manager' in config and isinstance(config.manager, dict):
 			self.manager_config = manager_config = config.manager
 		elif 'manager' in config:
-			self.manager_config = manager_config = dict(manager_config)
+			self.manager_config = manager_config = dict(config.manager) #  BUG:  dict(manager_config)
 		else:
-			try:
+			try:  # pull the manager out of the config if it is in there.
 				self.manager_config = manager_config = Bunch.partial('manager', config)
 			except ValueError:
 				self.manager_config = manager_config = dict()
@@ -94,8 +98,9 @@ class Mailer(object):
 		# Removed until marrow.interface is updated to use marrow.schema.
 		#if not isinstance(Transport, ITransport):
 		#	raise TypeError("Chosen transport does not conform to the transport API.")
-		
-		self.manager = Manager(manager_config, partial(Transport, transport_config))
+
+		transport_constructor = partial(Transport, transport_config)
+		self.manager = Manager(manager_config, transport_constructor)
 	
 	@staticmethod
 	def _load(spec, group):
@@ -107,10 +112,21 @@ class Mailer(object):
 			# Load the Python package(s) and target object.
 			return load_object(spec)
 		
-		# Load the entry point.
-		for entrypoint in pkg_resources.iter_entry_points(group, spec):
-			return entrypoint.load()
-	
+		# Load and return the first entry point (class) in the spec module inside the group.
+		# for entrypoint in pkg_resources.iter_entry_points(group, spec):
+		# 	return entrypoint.load()
+
+		# Load and return the first entry point (class) in the spec module inside the group.
+		try:
+			# Modern approach using importlib.metadata
+			for entry_point in importlib.metadata.entry_points(group=group, name=spec):
+				return entry_point.load()
+		except (ImportError, AttributeError):
+			# Fallback to pkg_resources if importlib.metadata is not available or doesn't support the interface
+			import pkg_resources
+			for entrypoint in pkg_resources.iter_entry_points(group, spec):
+				return entrypoint.load()
+
 	def start(self):
 		if self.running:
 			log.warning("Attempt made to start an already running Mailer service.")

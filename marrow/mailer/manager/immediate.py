@@ -11,13 +11,13 @@ log = __import__('logging').getLogger(__name__)
 
 
 class ImmediateManager(object):
-    __slots__ = ('transport', )
+    __slots__ = ('transport_pool',)
     
     def __init__(self, config, Transport):
         """Initialize the immediate delivery manager."""
         
         # Create a transport pool; this will encapsulate the recycling logic.
-        self.transport = TransportPool(Transport)
+        self.transport_pool = TransportPool(Transport)
         
         super(ImmediateManager, self).__init__()
     
@@ -30,7 +30,7 @@ class ImmediateManager(object):
         log.info("Immediate delivery manager starting.")
         
         log.debug("Initializing transport queue.")
-        self.transport.startup()
+        self.transport_pool.startup()
         
         log.info("Immediate delivery manager started.")
     
@@ -38,7 +38,7 @@ class ImmediateManager(object):
         result = None
         
         while True:
-            with self.transport() as transport:
+            with self.transport_pool() as transport:
                 try:
                     result = transport.deliver(message)
                 
@@ -65,6 +65,6 @@ class ImmediateManager(object):
         log.info("Immediate delivery manager stopping.")
         
         log.debug("Draining transport queue.")
-        self.transport.shutdown()
+        self.transport_pool.shutdown()
         
         log.info("Immediate delivery manager stopped.")
